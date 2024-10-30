@@ -1,9 +1,9 @@
 #include "chudnovsky.h"
 
 static void initPQR(PQR* pqr) {
-    mpzinit(pqr->P);
-    mpzinit(pqr->Q);
-    mpzinit(pqr->R);
+    mpz_init(pqr->P);
+    mpz_init(pqr->Q);
+    mpz_init(pqr->R);
 } 
 
 /**
@@ -12,9 +12,9 @@ static void initPQR(PQR* pqr) {
  * @param pqr 
  */
 static void clearPQR(PQR* pqr) {
-    mpzclear(pqr->P);
-    mpzclear(pqr->Q);
-    mpzclear(pqr->R);
+    mpz_clear(pqr->P);
+    mpz_clear(pqr->Q);
+    mpz_clear(pqr->R);
 }
 
 /**
@@ -151,7 +151,7 @@ void chudnovsky(mpz_t result, int digits) {
 
     // numerator = Q * 426880 * sqrt(10005)
     // or isqrt(10005 * 10^2n) * Q * 426880
-    // mpz_t num; mpzinit(num);
+    // mpz_t num; mpz_init(num);
     mpz_set_ui(result, 10);
     mpz_pow_ui(result, result, digits * 2);
     mpz_mul_ui(result, result, 10005);
@@ -160,7 +160,7 @@ void chudnovsky(mpz_t result, int digits) {
     mpz_mul_ui(result, result, 426880);
 
     // denominator = Q * 13591409 + R
-    mpz_t denom; mpzinit(denom);
+    mpz_t denom; mpz_init(denom);
     mpz_mul_ui(denom, _1n->Q, 13591409); // Multiply by 13591409
     mpz_add(denom, denom, _1n->R); // Add R1n to denominator
 
@@ -172,8 +172,8 @@ void chudnovsky(mpz_t result, int digits) {
         mpz_tdiv_q(result, result, denom);
     
     // discard denominator
-    mpzclear(denom);
+    mpz_clear(denom);
 
     // mpz_set(result, result);
-    // mpzclear(result);
+    // mpz_clear(result);
 }
