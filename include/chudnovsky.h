@@ -30,10 +30,6 @@ typedef struct {
     size_t size;
 } string_t;
 
-extern int inited;
-#define mpzinit(v) {mpz_init(v); inited++;}
-#define mpzclear(v) {mpz_clear(v); inited--;}
-
 /**
  * @brief 
  * 

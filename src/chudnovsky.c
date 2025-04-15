@@ -23,14 +23,15 @@ static void clearPQR(PQR* pqr) {
  * @param bs struct to initialize
  * @param depth max recursive depth
  */
-static void BS_init(BS_t* bs, size_t depth) {
+static void BS_init(BS_t* bs, size_t depth) 
+{
     mpz_init(bs->c3_24);
     mpz_init(bs->a3);
     mpz_init(bs->_545140134);
     mpz_set_str(bs->c3_24, "10939058860032000", 10);
     bs->nres = depth;
-    bs->res[0] = (PQR*) malloc(sizeof(PQR) * depth);
-    bs->res[1] = (PQR*) malloc(sizeof(PQR) * depth);
+    bs->res[0] = (PQR*) heap_caps_malloc(sizeof(PQR) * depth, MALLOC_CAP_DEFAULT);
+    bs->res[1] = (PQR*) heap_caps_malloc(sizeof(PQR) * depth, MALLOC_CAP_DEFAULT);
     for (int i = 0; i < depth; i++) {
         initPQR(&bs->res[0][i]);
         initPQR(&bs->res[1][i]);
@@ -42,7 +43,8 @@ static void BS_init(BS_t* bs, size_t depth) {
  * 
  * @param bs struct to deinit
  */
-static void BS_deinit(BS_t* bs) {
+static void BS_deinit(BS_t* bs) 
+{
     mpz_clear(bs->a3);
     mpz_clear(bs->_545140134);
     mpz_clear(bs->c3_24);
@@ -51,8 +53,8 @@ static void BS_deinit(BS_t* bs) {
         clearPQR(&bs->res[1][i]);
     }
     bs->nres = 0;
-    free(bs->res[0]);
-    free(bs->res[1]);
+    heap_caps_free(bs->res[0]);
+    heap_caps_free(bs->res[1]);
 }
 
 /**
@@ -85,9 +87,12 @@ static void BS_deinit(BS_t* bs) {
  * @param pos first half (a to m) or second half (m to b)
  * @return PQR* pointer result
  */
-static PQR* binary_split(int a, int b, BS_t* data, int depth, int pos) {
+static inline PQR* binary_split(const int a, const int b, BS_t* data, const int depth, const int pos) 
+{
     PQR* res = &data->res[pos][depth];
-    if (b == a + 1) {
+
+    if (b == a + 1) 
+    {
         mpz_set_si(res->P, -(6*a - 5));
         mpz_mul_si(res->P, res->P, 2 * a - 1);
         mpz_mul_si(res->P, res->P, 6 * a - 1);
@@ -99,7 +104,9 @@ static PQR* binary_split(int a, int b, BS_t* data, int depth, int pos) {
         mpz_mul_ui(data->_545140134, data->_545140134, a);
         mpz_add_ui(data->_545140134, data->_545140134, 13591409);
         mpz_mul(res->R, res->P, data->_545140134);
-    } else {
+    } 
+    else 
+    {
         int m = (a + b) / 2;
 
         PQR *pqr_am = binary_split(a, m, data, depth + 1, 0);
