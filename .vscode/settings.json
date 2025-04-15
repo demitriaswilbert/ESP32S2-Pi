@@ -3,6 +3,8 @@
         "*.json": "json",
         "bitset": "cpp",
         "chrono": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "numbers": "cpp",
+        "string_view": "cpp"
     }
 }
