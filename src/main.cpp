@@ -2,33 +2,104 @@
 #include <USBCDC.h>
 #include <USB.h>
 #include <gmp-ino.h>
+#include "soc/gpio_struct.h"
 extern "C" {
 #include "chudnovsky.h"
 }
 
-USBCDC Serial;
+#include "ble_config.h"
+
+CustomBLEDevice device;
+
+#ifndef log_cdc
+size_t log_cdc_raw(int target, const char *format, ...);
+#define log_cdc(target, format, ...) log_cdc_raw(target, format "\n", ##__VA_ARGS__)
+#endif
+
+size_t log_cdc_raw(int target, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    
+    size_t written = 0;
+    if (target == TARGET_USB)
+        written = Serial.vprintf(format, args);
+    
+    else if (target == TARGET_BLE)
+        written = device.vprintf(format, args);
+    
+    va_end(args);
+    return written;
+}
+
+
+void controls(const char c, const log_target_e target);
+
+void bt_recv_task(void *param)
+{
+    data_len_t *data = NULL;
+    while (true)
+    {
+        if (!device.canRead()) 
+        {
+            vTaskDelay(100);
+            continue;
+        }
+        if (device.read(&data, 2000) == pdTRUE)
+        {
+            Serial.write(data->data, data->len);
+            for (int i = 0; i < data->len; i++)
+                controls(data->data[i], TARGET_BLE);
+            free(data);
+        } 
+    }
+    vTaskDelete(NULL);
+}
+
+uint32_t alloc = 0;
+uint32_t max_alloc = 0;
+// std::map<void*, size_t> allocation_map;
 
 void* psram_malloc(size_t n) {
-    return heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
+    void* ptr = heap_caps_malloc(n, MALLOC_CAP_INTERNAL);
+    // if (ptr) {
+    //     alloc += n;
+    //     allocation_map[ptr] = n;
+    // }
+    alloc++;
+    max_alloc = alloc > max_alloc? alloc : max_alloc;
+    return ptr;
 }
+
 void* psram_realloc(void* p, size_t unused, size_t b) {
-    return heap_caps_realloc(p, b, MALLOC_CAP_SPIRAM);
+    // if (allocation_map.find(p) != allocation_map.end()) {
+    //     alloc -= allocation_map[p];
+    //     allocation_map.erase(p);
+    // }
+    void* new_ptr = heap_caps_realloc(p, b, MALLOC_CAP_INTERNAL);
+    // if (new_ptr) {
+    //     alloc += b;
+    //     allocation_map[new_ptr] = b;
+    // }
+    max_alloc = alloc > max_alloc? alloc : max_alloc;
+    return new_ptr;
 }
+
 void psram_free(void* p, size_t unused) {
+    // if (allocation_map.find(p) != allocation_map.end()) {
+    //     alloc -= allocation_map[p];
+    //     allocation_map.erase(p);
+    // }
+    alloc--;
+    max_alloc = alloc > max_alloc? alloc : max_alloc;
     heap_caps_free(p);
 }
 
 void boot_config() {
-    USB.productName("Dewe BLDC Test");
-    USB.manufacturerName("Dewe's Nut");
-    USB.begin();
     Serial.begin();
-    // Serial.setDebugOutput(true);
 }
 
 static mpz_t val;
-static uint32_t free_heap = 0;
-static uint32_t free_psram = 0;
 
 void euler(mpz_t res, int digits) {
     mpz_t one, term, denom;
@@ -45,43 +116,161 @@ void euler(mpz_t res, int digits) {
         mpz_add(res, res, term);
         mpz_mul_ui(denom, denom, i);
     }
-    free_psram = ESP.getFreePsram();
-    free_heap = ESP.getFreeHeap();
     mpz_clear(one);
     mpz_clear(term);
     mpz_clear(denom);
 }
 
+static char pi_string[5020];
+
 void setup() {
 
+#ifdef CONFIG_IDF_TARGET_ESP32H2
+#warning "target H2"
+    setCpuFrequencyMhz(48); // Set CPU frequency to 80 MHz
+#endif
     boot_config();
-
-    pinMode(21, INPUT_PULLUP);
-    pinMode(18, INPUT_PULLUP);
-    pinMode(17, INPUT_PULLUP);
+    device.begin();
+    xTaskCreate(bt_recv_task, "recv task", 4096, NULL, 5, NULL);
 
     mp_set_memory_functions(psram_malloc, psram_realloc, psram_free);
-    Serial0.begin(115200, SERIAL_8N1, 13, 16, true);
-    mpzinit(val);
-    pinMode(18, INPUT_PULLUP);
+    pinMode(0, INPUT_PULLUP);
 }
-int inited = 0;
+
+void do_calculation(void (*func)(mpz_t, int), int digits, log_target_e target) {
+
+    max_alloc = alloc;
+    log_cdc(target,"Before: %lu", alloc);
+
+    mpz_init(val);
+    int64_t time = esp_timer_get_time();
+    func(val, digits);
+    time = esp_timer_get_time() - time;
+
+    log_cdc(target,"Calculated: %lu", alloc);
+
+    char* str = mpz_get_str(pi_string, 10, val);
+    mpz_clear(val);
+
+    log_cdc(target,
+        "After: %lu\n"
+        "time: %llu\n"
+        "Max Alloc: %lu\n"
+        "Pi:"
+        ,
+        alloc, time, max_alloc
+    );
+    log_cdc(target, "%s", str);
+}
+
+const char* get_power_level_string(const esp_power_level_t pl)
+{
+    switch(pl) {
+        case ESP_PWR_LVL_N24: 
+            return "ESP_PWR_LVL_N24";
+        case ESP_PWR_LVL_N21: 
+            return "ESP_PWR_LVL_N21";
+        case ESP_PWR_LVL_N18: 
+            return "ESP_PWR_LVL_N18";
+        case ESP_PWR_LVL_N15: 
+            return "ESP_PWR_LVL_N15";
+        case ESP_PWR_LVL_N12: 
+            return "ESP_PWR_LVL_N12";
+        case ESP_PWR_LVL_N9: 
+            return "ESP_PWR_LVL_N9";
+        case ESP_PWR_LVL_N6: 
+            return "ESP_PWR_LVL_N6";
+        case ESP_PWR_LVL_N3: 
+            return "ESP_PWR_LVL_N3";
+        case ESP_PWR_LVL_N0: 
+            return "ESP_PWR_LVL_N0";
+        case ESP_PWR_LVL_P3: 
+            return "ESP_PWR_LVL_P3";
+        case ESP_PWR_LVL_P6: 
+            return "ESP_PWR_LVL_P6";
+        case ESP_PWR_LVL_P9: 
+            return "ESP_PWR_LVL_P9";
+        case ESP_PWR_LVL_P12: 
+            return "ESP_PWR_LVL_P12";
+        case ESP_PWR_LVL_P15: 
+            return "ESP_PWR_LVL_P15";
+        case ESP_PWR_LVL_P18: 
+            return "ESP_PWR_LVL_P18";
+        case ESP_PWR_LVL_P20: 
+            return "ESP_PWR_LVL_P20";
+    }
+    return "ESP_PWR_LVL_INVALID";
+}
+
+void controls(const char c, const log_target_e target) {
+
+    static const int digits[] = {100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000};
+    static const int n_digits = sizeof(digits) / sizeof(digits[0]);
+    static int selected = 0;
+    
+    static const esp_power_level_t power_levels[] = {
+        ESP_PWR_LVL_N24,
+        ESP_PWR_LVL_N21,
+        ESP_PWR_LVL_N18,
+        ESP_PWR_LVL_N15,
+        ESP_PWR_LVL_N12,
+        ESP_PWR_LVL_N9,
+        ESP_PWR_LVL_N6,
+        ESP_PWR_LVL_N3,
+        ESP_PWR_LVL_N0,
+        ESP_PWR_LVL_P3,
+        ESP_PWR_LVL_P6,
+        ESP_PWR_LVL_P9,
+        ESP_PWR_LVL_P12,
+        ESP_PWR_LVL_P15,
+        ESP_PWR_LVL_P18,
+        ESP_PWR_LVL_P20,
+    };
+    static const int n_power_levels = sizeof(power_levels) / sizeof(power_levels[0]);
+    static int selected_power_level = 8;
+
+    if (c == 'a') {
+        selected = (selected + 1) % n_digits;
+        log_cdc(target,"Selected: %d digits", digits[selected]);
+    } else if (c == 'b') {
+        selected = (selected + n_digits - 1) % n_digits;
+        log_cdc(target,"Selected: %d digits", digits[selected]);
+    } else if (c == 'p') {
+        do_calculation(chudnovsky, digits[selected], target);
+    } else if (c == 'e') {
+        do_calculation(euler, digits[selected], target);
+    } else if (c == 'm') {
+        selected_power_level = (selected_power_level + 1) % n_power_levels;
+        BLEDevice::setPower(power_levels[selected_power_level]);
+        const char* power_level_str = get_power_level_string(power_levels[selected_power_level]);
+        log_cdc(target, "Power Level: %s", power_level_str);
+    } else if (c == 'n') {
+        selected_power_level = (selected_power_level + n_power_levels - 1) % n_power_levels;
+        BLEDevice::setPower(power_levels[selected_power_level]);
+        const char* power_level_str = get_power_level_string(power_levels[selected_power_level]);
+        log_cdc(target, "Power Level: %s", power_level_str);
+    } else if (c == 's') {
+        const char* fm = "UNKNOWN";
+        switch(ESP.getFlashChipMode()) {
+            case FM_QIO: fm = "FM_QIO"; break;
+            case FM_QOUT: fm = "FM_QOUT"; break;
+            case FM_DIO: fm = "FM_DIO"; break;
+            case FM_DOUT: fm = "FM_DOUT"; break;
+            case FM_FAST_READ: fm = "FM_FAST_READ"; break;
+            case FM_SLOW_READ: fm = "FM_SLOW_READ"; break;
+            case FM_UNKNOWN: 
+            default: fm = "FM_UNKNOWN"; break;
+        }
+        log_cdc(target, "CPU: %lu, Heap: %lu, Flash: %s", ESP.getCpuFreqMHz(), ESP.getFreeHeap(), fm);
+    }
+
+}
+
 void loop() {
 
-    
-    if (!(GPIO.in & (1UL << 18))) {
-        int64_t time = esp_timer_get_time();
-        chudnovsky(val, 314);
-        time = esp_timer_get_time() - time;
-
-        char* str = mpz_get_str(NULL, 10, val);
-        String pi_str = str;
-        free(str);
-
-        // Serial.print(pi_str);
-        // Serial.printf("\ntime: %lu\ninited:%d\nFree Heap: %lu\nFree PSRAM: %lu\n", (uint32_t)time, inited, ESP.getFreeHeap(), ESP.getFreePsram());
-        // Serial.printf("Used Heap: %lu\nUsed PSRAM: %lu\n\n", free_heap, free_psram);
-        Serial0.print(pi_str);
+    if (Serial.available()) {
+        char c = Serial.read();
+        controls(c, TARGET_USB);
     }
-    vTaskDelay(2);
+    vTaskDelay(10);
 }
