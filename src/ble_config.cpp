@@ -1,6 +1,6 @@
 #include "ble_config.h"
 
-void CustomBLEDevice::begin() {
+void CustomBLEDevice::begin(String deviceName) {
     
     if (mTxLock == NULL)
     {
@@ -22,7 +22,7 @@ void CustomBLEDevice::begin() {
     }
 
     // Initialize BLE device
-    BLEDevice::init("Pi Sensor");
+    BLEDevice::init(deviceName);
     BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT);
 
     // Create BLE security configuration
@@ -67,7 +67,7 @@ void CustomBLEDevice::begin() {
     // Start the service
     pService->start();
     BLEDevice::setMTU(517); // Set the MTU size to 517 (maximum for BLE)
-    BLEDevice::setPower(ESP_PWR_LVL_N0);
+    BLEDevice::setPower(ESP_PWR_LVL_P6);
 
     // Start advertising
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();

@@ -22,7 +22,7 @@ typedef struct
 } data_len_t;
 
 #ifndef log_cdc
-size_t log_cdc_raw(int target, const char *format, ...);
+size_t log_cdc_raw(const int target, const char *format, ...);
 #define log_cdc(target, format, ...) log_cdc_raw(target, format "\n", ##__VA_ARGS__)
 #endif
 
@@ -33,22 +33,22 @@ size_t log_cdc_raw(int target, const char *format, ...);
 
 class CustomBLEDevice : public BLEServerCallbacks, public BLECharacteristicCallbacks, public BLESecurityCallbacks, public Print
 {
-    BLEServer *pServer = nullptr;
-    BLEService *pService = nullptr;
-
-    std::set<uint16_t> m_connected_ids;
-
-    BLECharacteristic *pTxCharacteristic = nullptr;
-    BLECharacteristic *pRxCharacteristic = nullptr;
-
     SemaphoreHandle_t mTxLock = nullptr;
     QueueHandle_t rxQueue = nullptr;
+
+    BLEServer *pServer = nullptr;
+    BLEService *pService = nullptr;
+    
+    BLECharacteristic *pTxCharacteristic = nullptr;
+    BLECharacteristic *pRxCharacteristic = nullptr;
+    
+    std::set<uint16_t> m_connected_ids;
 
     void onConnect(BLEServer *pServer) override
     {
         m_connected_ids.insert(pServer->getConnId());
         log_cdc(TARGET_USB, "Device connected");
-        BLEDevice::startAdvertising(); // Restart advertising after disconnection
+        // BLEDevice::startAdvertising(); // Restart advertising after disconnection
     }
 
     void onDisconnect(BLEServer *pServer) override
@@ -119,7 +119,7 @@ public:
     {
     }
 
-    inline const bool canRead() const {return rxQueue != NULL;}
+    inline bool canRead() const {return rxQueue != NULL;}
     
     BaseType_t read(data_len_t **data, TickType_t xTicksToWait = portMAX_DELAY)
     {
@@ -128,9 +128,9 @@ public:
         return xQueueReceive(rxQueue, data, xTicksToWait);
     }
 
-    void begin();
+    void begin(String deviceName);
 
-    inline const int connected() const { return m_connected_ids.size(); }
+    inline int connected() const { return m_connected_ids.size(); }
 
     size_t write(uint8_t c)
     {
@@ -140,7 +140,7 @@ public:
     size_t write(const uint8_t *buffer, size_t size)
     {
         if (mTxLock == NULL)
-            return false;
+            return 0;
 
         size_t bytesSent = 0;
         if (!connected())
