@@ -11,12 +11,15 @@ extern "C" {
 
 CustomBLEDevice device;
 
+static void controls(const char c, const log_target_e target);
+
 #ifndef log_cdc
-size_t log_cdc_raw(int target, const char *format, ...);
+size_t log_cdc_raw(const int target, const char *format, ...);
 #define log_cdc(target, format, ...) log_cdc_raw(target, format "\n", ##__VA_ARGS__)
 #endif
 
-size_t log_cdc_raw(int target, const char *format, ...)
+
+size_t log_cdc_raw(const int target, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -32,10 +35,11 @@ size_t log_cdc_raw(int target, const char *format, ...)
     return written;
 }
 
-
-void controls(const char c, const log_target_e target);
-
-void bt_recv_task(void *param)
+/**
+ * Task to receive and process data from BLE
+ * @param param Pointer to task parameters (not used)
+ */
+static void bt_recv_task(void *param)
 {
     data_len_t *data = NULL;
     while (true)
@@ -56,8 +60,8 @@ void bt_recv_task(void *param)
     vTaskDelete(NULL);
 }
 
-uint32_t alloc = 0;
-uint32_t max_alloc = 0;
+static uint32_t alloc = 0;
+static uint32_t max_alloc = 0;
 // std::map<void*, size_t> allocation_map;
 
 void* psram_malloc(size_t n) {
@@ -123,47 +127,33 @@ void euler(mpz_t res, int digits) {
 
 static char pi_string[5020];
 
-void setup() {
-
-#ifdef CONFIG_IDF_TARGET_ESP32H2
-#warning "target H2"
-    setCpuFrequencyMhz(48); // Set CPU frequency to 80 MHz
-#endif
-    boot_config();
-    device.begin();
-    xTaskCreate(bt_recv_task, "recv task", 4096, NULL, 5, NULL);
-
-    mp_set_memory_functions(psram_malloc, psram_realloc, psram_free);
-    pinMode(0, INPUT_PULLUP);
-}
-
-void do_calculation(void (*func)(mpz_t, int), int digits, log_target_e target) {
+static void do_calculation(void (*func)(mpz_t, int), int digits, log_target_e target) {
 
     max_alloc = alloc;
-    log_cdc(target,"Before: %lu", alloc);
+    // log_cdc(target,"Before: %lu", alloc);
 
     mpz_init(val);
     int64_t time = esp_timer_get_time();
     func(val, digits);
     time = esp_timer_get_time() - time;
 
-    log_cdc(target,"Calculated: %lu", alloc);
+    // log_cdc(target,"Calculated: %lu", alloc);
 
     char* str = mpz_get_str(pi_string, 10, val);
     mpz_clear(val);
 
-    log_cdc(target,
-        "After: %lu\n"
-        "time: %llu\n"
-        "Max Alloc: %lu\n"
-        "Pi:"
-        ,
-        alloc, time, max_alloc
-    );
+    // log_cdc(target,
+    //     "After: %lu\n"
+    //     "time: %llu\n"
+    //     "Max Alloc: %lu\n"
+    //     "Pi:"
+    //     ,
+    //     alloc, time, max_alloc
+    // );
     log_cdc(target, "%s", str);
 }
 
-const char* get_power_level_string(const esp_power_level_t pl)
+static inline const char* get_power_level_string(const esp_power_level_t pl)
 {
     switch(pl) {
         case ESP_PWR_LVL_N24: 
@@ -198,58 +188,76 @@ const char* get_power_level_string(const esp_power_level_t pl)
             return "ESP_PWR_LVL_P18";
         case ESP_PWR_LVL_P20: 
             return "ESP_PWR_LVL_P20";
+        default: return "ESP_PWR_LVL_INVALID";
     }
     return "ESP_PWR_LVL_INVALID";
 }
 
-void controls(const char c, const log_target_e target) {
+static const esp_power_level_t power_levels[] = {
+    ESP_PWR_LVL_N24,
+    ESP_PWR_LVL_N21,
+    ESP_PWR_LVL_N18,
+    ESP_PWR_LVL_N15,
+    ESP_PWR_LVL_N12,
+    ESP_PWR_LVL_N9,
+    ESP_PWR_LVL_N6,
+    ESP_PWR_LVL_N3,
+    ESP_PWR_LVL_N0,
+    ESP_PWR_LVL_P3,
+    ESP_PWR_LVL_P6,
+    ESP_PWR_LVL_P9,
+    ESP_PWR_LVL_P12,
+    ESP_PWR_LVL_P15,
+    ESP_PWR_LVL_P18,
+    ESP_PWR_LVL_P20,
+};
+static const int n_power_levels = sizeof(power_levels) / sizeof(power_levels[0]);
 
-    static const int digits[] = {100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000};
-    static const int n_digits = sizeof(digits) / sizeof(digits[0]);
+static const int digits[] = {
+    100, 200, 300, 400, 500, 
+    600, 700, 800, 900, 1000, 
+    2000, 3000, 4000, 5000
+};
+static const int n_digits = sizeof(digits) / sizeof(digits[0]);
+
+static void controls(const char c, const log_target_e target) {
+
     static int selected = 0;
-    
-    static const esp_power_level_t power_levels[] = {
-        ESP_PWR_LVL_N24,
-        ESP_PWR_LVL_N21,
-        ESP_PWR_LVL_N18,
-        ESP_PWR_LVL_N15,
-        ESP_PWR_LVL_N12,
-        ESP_PWR_LVL_N9,
-        ESP_PWR_LVL_N6,
-        ESP_PWR_LVL_N3,
-        ESP_PWR_LVL_N0,
-        ESP_PWR_LVL_P3,
-        ESP_PWR_LVL_P6,
-        ESP_PWR_LVL_P9,
-        ESP_PWR_LVL_P12,
-        ESP_PWR_LVL_P15,
-        ESP_PWR_LVL_P18,
-        ESP_PWR_LVL_P20,
-    };
-    static const int n_power_levels = sizeof(power_levels) / sizeof(power_levels[0]);
-    static int selected_power_level = 8;
+    static int selected_power_level = 10;
 
-    if (c == 'a') {
-        selected = (selected + 1) % n_digits;
+    if (c == 'a' || c == 'b') 
+    {
+        // select digits to compute (a: increment, b: decrement)
+        selected += c == 'a'? 1 : (n_digits - 1);
+        selected %= n_digits;
+
         log_cdc(target,"Selected: %d digits", digits[selected]);
-    } else if (c == 'b') {
-        selected = (selected + n_digits - 1) % n_digits;
-        log_cdc(target,"Selected: %d digits", digits[selected]);
-    } else if (c == 'p') {
-        do_calculation(chudnovsky, digits[selected], target);
-    } else if (c == 'e') {
-        do_calculation(euler, digits[selected], target);
-    } else if (c == 'm') {
-        selected_power_level = (selected_power_level + 1) % n_power_levels;
+    } 
+    else if (c == 'p' || c == 'e') 
+    {
+        // calculate euler or pi
+        do_calculation(
+            c == 'p'? chudnovsky : euler, 
+            digits[selected], 
+            target
+        );
+    } 
+    else if (c == 'm' || c == 'n') 
+    {
+        // select Ble Power levels (m: increment, n: decrement)
+        selected_power_level += c == 'm'? 1 : (n_power_levels - 1);
+        selected_power_level %= n_power_levels;
+
         BLEDevice::setPower(power_levels[selected_power_level]);
-        const char* power_level_str = get_power_level_string(power_levels[selected_power_level]);
+
+        const char* power_level_str = 
+            get_power_level_string(power_levels[selected_power_level]);
+            
         log_cdc(target, "Power Level: %s", power_level_str);
-    } else if (c == 'n') {
-        selected_power_level = (selected_power_level + n_power_levels - 1) % n_power_levels;
-        BLEDevice::setPower(power_levels[selected_power_level]);
-        const char* power_level_str = get_power_level_string(power_levels[selected_power_level]);
-        log_cdc(target, "Power Level: %s", power_level_str);
-    } else if (c == 's') {
+    } 
+    else if (c == 's') 
+    {
+        // system status
         const char* fm = "UNKNOWN";
         switch(ESP.getFlashChipMode()) {
             case FM_QIO: fm = "FM_QIO"; break;
@@ -261,10 +269,40 @@ void controls(const char c, const log_target_e target) {
             case FM_UNKNOWN: 
             default: fm = "FM_UNKNOWN"; break;
         }
-        log_cdc(target, "CPU: %lu, Heap: %lu, Flash: %s", ESP.getCpuFreqMHz(), ESP.getFreeHeap(), fm);
+        log_cdc(target, 
+            "CPU: %lu, Heap: %lu, Flash: %s\n"
+            "Alloc: %lu, Max Alloc: %lu", 
+            ESP.getCpuFreqMHz(), ESP.getFreeHeap(), fm,
+            alloc, max_alloc
+        );
     }
+    else if (c == 'j' || c == 'k' || (c >= '0' && c <= '9')) 
+    {
+        // set LED duty cycle
+        static int duty = 0;
+        duty = (c >= '0' && c <= '9')? 
+            (1023 * ((int)c - '0') / 9) :
+            c == 'j'? 
+                (duty < 1023? duty + 1 : 1023) :
+                (duty > 0? duty - 1 : 0);
 
+        ledcWrite(8, duty);
+        log_cdc(target, "duty: %d", duty);
+    }
 }
+
+void setup() {
+    boot_config();
+    device.begin("Pi Sensor");
+    xTaskCreate(bt_recv_task, "recv task", 4096, NULL, 5, NULL);
+
+    ledcSetClockSource(LEDC_AUTO_CLK);
+    ledcAttach(8, 78125, 10);
+
+    mp_set_memory_functions(psram_malloc, psram_realloc, psram_free);
+    pinMode(0, INPUT_PULLUP);
+}
+
 
 void loop() {
 
@@ -272,5 +310,4 @@ void loop() {
         char c = Serial.read();
         controls(c, TARGET_USB);
     }
-    vTaskDelay(10);
 }
